@@ -1,0 +1,14 @@
+[workspace]
+authors = ["Giordon Stark <kratsg@gmail.com>"]
+channels = ["conda-forge"]
+name = "exploring"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+histserv = ">=0.2.1,<0.3"
+python = ">=3.14.7,<3.15"
+root = ">=6.40.4,<7"
+uhi = ">=1.1.1,<2"

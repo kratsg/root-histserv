@@ -1,0 +1,11 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# nested checkouts, each their own git repo
+/root/
+/uhi/
+/histserv/
+
+# harness state
+/.claude/
