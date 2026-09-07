@@ -1,14 +1,27 @@
 [workspace]
 authors = ["Giordon Stark <kratsg@gmail.com>"]
 channels = ["conda-forge"]
-name = "exploring"
-platforms = ["osx-arm64"]
+name = "root-histserv"
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [tasks]
+serve = { cmd = "python -m histserv --port 50051" }
+configure = { cmd = "cmake -S cpp-client -B cpp-client/build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo" }
+build = { cmd = "cmake --build cpp-client/build", depends-on = ["configure"] }
+test = { cmd = "pytest cpp-client/test -v", depends-on = ["build"] }
 
 [dependencies]
 histserv = ">=0.2.1,<0.3"
 python = ">=3.14.7,<3.15"
 root = ">=6.40.4,<7"
 uhi = ">=1.1.1,<2"
+libgrpc = "*"
+libprotobuf = "*"
+nlohmann_json = "*"
+cmake = ">=3.28"
+ninja = ">=1.11"
+cxx-compiler = ">=1.7"
+c-compiler = ">=1.7"
+pkg-config = ">=0.29"
+pytest = ">=8"

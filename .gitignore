@@ -9,3 +9,6 @@
 
 # harness state
 /.claude/
+
+# C++ client build output (generated protobuf/grpc code + object files)
+/cpp-client/build/
