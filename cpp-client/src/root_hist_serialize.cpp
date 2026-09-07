@@ -87,9 +87,15 @@ ChunkedHistPayload SerializeTH1(const TH1* h) {
     schema["metadata"] = {{"name", std::string(h->GetName())}, {"label", std::string(h->GetTitle())}};
 
     const long total_cells = static_cast<long>(ncells[0]) * ncells[1] * ncells[2];
-    const std::size_t stride = weighted ? 2 * sizeof(double) : sizeof(double);
-    std::string dense_view(static_cast<std::size_t>(total_cells) * stride, '\0');
-    auto* out = reinterpret_cast<double*>(dense_view.data());
+    const std::size_t doubles_per_cell = weighted ? 2 : 1;
+    // Write into a properly-typed double buffer, not a reinterpret_cast'd
+    // std::string buffer: writing a double through a pointer reinterpreted
+    // from a char-typed (std::string) buffer violates the strict-aliasing
+    // rule, and different compilers/platforms are free to (and in practice
+    // do) miscompile that differently. Reading a double buffer's bytes back
+    // out through a char pointer, done below, is well-defined.
+    std::vector<double> buffer(static_cast<std::size_t>(total_cells) * doubles_per_cell, 0.0);
+    double* out = buffer.data();
 
     // Row-major over (i0, i1, i2) with axis 0 slowest-varying -- this matches
     // boost-histogram's dense view for a histogram whose axes were declared
@@ -127,7 +133,7 @@ ChunkedHistPayload SerializeTH1(const TH1* h) {
     ChunkedHistPayload payload;
     payload.set_hist_json(schema.dump());
     ChunkPayload* chunk = payload.add_chunks(); // no categorical axes -> one chunk, empty key
-    chunk->set_dense_view(dense_view);
+    chunk->set_dense_view(reinterpret_cast<const char*>(buffer.data()), buffer.size() * sizeof(double));
     return payload;
 }
 
