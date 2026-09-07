@@ -1,14 +1,26 @@
 // Minimal demo/PoC: fill ROOT histograms entirely locally (the normal, fast
 // ROOT way), then push their finished state to a running HistServ server
-// with HistServClient. Prints one "HIST_ID <label> <hist_id>" line per
-// remote histogram created, so cpp-client/test/test_integration.py can
-// parse them and cross-check against independently-built ROOT references.
+// with HistServClient. Prints "HIST_ID <label> <hist_id>" and
+// "HIST_VALUES <label> v0,v1,..." (and "HIST_VARIANCES <label> ..." for
+// weighted histograms) lines so cpp-client/test/test_integration.py can
+// cross-check the server's response against the ACTUAL local ground truth --
+// deliberately not a second, independently-reseeded ROOT histogram: an
+// earlier version of this test rebuilt references with a fresh
+// ROOT.TRandom3(same seed) in Python, which turned out NOT to reliably
+// reproduce the same draw sequence as this process's TRandom3 (observed
+// mismatching, non-flaky-looking-until-investigated results on Linux CI --
+// see git history). Dumping this process's own bin contents sidesteps that
+// entirely and is a strictly more direct test of "did the server receive and
+// return what we actually sent."
 #include <TH1D.h>
 #include <TH2D.h>
 #include <TProfile.h>
 #include <TRandom3.h>
 
+#include <array>
+#include <cstdio>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
 #include "hist_serv_client.hpp"
@@ -42,6 +54,42 @@ void ExpectProfileRejected(histserv_client::HistServClient& client) {
     }
 }
 
+// Prints this histogram's own bin contents (and variances, if Sumw2 is
+// active) in exactly the row-major, axis-0-outermost order SerializeTH1
+// writes them in, so the test can compare against the flattened server
+// response without needing to independently reconstruct the same data.
+void DumpBins(const std::string& label, const TH1* h) {
+    const int ndim = h->GetDimension();
+    std::array<const TAxis*, 3> axis = {h->GetXaxis(), nullptr, nullptr};
+    if (ndim >= 2) axis[1] = h->GetYaxis();
+    if (ndim >= 3) axis[2] = h->GetZaxis();
+
+    std::array<int, 3> ncells = {1, 1, 1};
+    for (int d = 0; d < ndim; ++d) ncells[d] = axis[d]->GetNbins() + 2;
+
+    const bool weighted = h->GetSumw2N() > 0;
+    std::ostringstream values;
+    std::ostringstream variances;
+    char buf[64];
+    for (int i0 = 0; i0 < ncells[0]; ++i0) {
+        for (int i1 = 0; i1 < ncells[1]; ++i1) {
+            for (int i2 = 0; i2 < ncells[2]; ++i2) {
+                const int bin = h->GetBin(i0, i1, i2);
+                std::snprintf(buf, sizeof(buf), "%.17g", h->GetBinContent(bin));
+                values << buf << ",";
+                if (weighted) {
+                    std::snprintf(buf, sizeof(buf), "%.17g", h->GetSumw2()->At(bin));
+                    variances << buf << ",";
+                }
+            }
+        }
+    }
+    std::cout << "HIST_VALUES " << label << " " << values.str() << std::endl;
+    if (weighted) {
+        std::cout << "HIST_VARIANCES " << label << " " << variances.str() << std::endl;
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -61,10 +109,14 @@ int main(int argc, char** argv) {
     TRandom3 rng2(1337);
     for (int i = 0; i < 10000; ++i) h2.Fill(rng2.Gaus(0.5, 1.5));
 
+    TH1D merged(h1);
+    merged.Add(&h2); // TH1::Add sums bin contents AND fSumw2 (variances) correctly
+
     const std::string merged_1d_id = client.Init(&h1, /*token=*/"");
     client.Fill(merged_1d_id, &h2, /*token=*/"", /*unique_id=*/"job2-run1");
     ExpectRejected(client, merged_1d_id, &h2, "job2-run1");
     std::cout << "HIST_ID merged_1d " << merged_1d_id << std::endl;
+    DumpBins("merged_1d", &merged);
 
     // --- Unweighted, variable-bin-width 1D histogram ---
     double edges[] = {-5.0, -1.0, -0.5, 0.0, 0.5, 1.0, 5.0};
@@ -73,6 +125,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 5000; ++i) h3.Fill(rng3.Gaus(0.0, 1.0));
     const std::string variable_1d_id = client.Init(&h3, /*token=*/"");
     std::cout << "HIST_ID variable_1d " << variable_1d_id << std::endl;
+    DumpBins("variable_1d", &h3);
 
     // --- 2D, weighted histogram: exercises the multi-dimensional reindexing path ---
     TH2D h4("job4", "2D weighted", 8, -4.0, 4.0, 5, -2.5, 2.5);
@@ -83,6 +136,7 @@ int main(int argc, char** argv) {
     }
     const std::string weighted_2d_id = client.Init(&h4, /*token=*/"");
     std::cout << "HIST_ID weighted_2d " << weighted_2d_id << std::endl;
+    DumpBins("weighted_2d", &h4);
 
     ExpectProfileRejected(client);
 
